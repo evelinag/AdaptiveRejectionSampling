@@ -148,7 +148,6 @@ let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
         | InsideInterval intervalIdx ->
             let lh = lowerHull.[intervalIdx]
             lh.M * x + lh.B
-        | _ -> failwith "Lower hull cannot be evaluated at x"
     
     // upper bound
     let uhVal =
