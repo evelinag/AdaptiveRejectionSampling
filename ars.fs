@@ -1,5 +1,5 @@
 ﻿
-module AdaptiveRejectionSampling.Ars
+module AdaptiveRejectionSampling
 
 open System
 
