@@ -46,13 +46,37 @@ let logDiffExp a b =
     let diff' = (a' - b') |> log
     diff' + abMax
 
+/// Computes hull lines between two points. Parameters
+/// are the points `x` and `xNext` with their function values `fx` and `fxNext`.
 let computeHullLines x xNext fx fxNext =
     let m = (fxNext - fx)/(xNext - x)
     let b = fx - m * x
     m, b
 
-let computeHullProbability m b x xNext =
-    0.0
+/// Log probability of a hull within the interval [x, xNext]
+let computeHullLogProb m b x xNext =
+    if m > 0.0 then
+        b - log(m) + logDiffExp (m * xNext) (m * x)
+    else
+        // decreasing function - numerically equivalent but avoids negative arguments in log
+        b - log(-m) + logDiffExp (m * x) (m * xNext)
+
+/// Log probability of the initial hull.
+/// From the boundary (finite or -infinity) to the first point.
+let computeInitialHullLogProb m b x =
+    if m > 0.0 then
+        b - log(m) + (m * x)
+    else
+        b - log(-m) - (m * x)
+
+/// Log probability of the end hull.
+/// From the last point to the boundary (finite or infinity)
+let computeEndHullLogProb m b x = 
+    if m > 0.0 then
+        b - log(m) - (m * x)
+    else 
+        b - log(-m) + (m * x)
+
 
 /// Compute hulls from a set of points and their function values
 let arsComputeHulls domain (S: float[]) (fS: float[]) =
@@ -69,23 +93,15 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
     // first line from the domain boundary
     let upperHullBoundaryBeg =
         let m, b = computeHullLines S.[0] S.[1] fS.[0] fS.[1]
-        let pr = exp(b)/m * (exp(m*S.[0]) - 0.0)  // integrating from -infinity (or boundary point?)
-        let logPr = 
-            if m > 0.0 then
-                b - log(m) + m * S.[0]
-            else
-                b - log(-m) + m * S.[0]
+        //let pr = exp(b)/m * (exp(m*S.[0]) - 0.0)  // integrating from -infinity (or boundary point?)
+        let logPr = computeInitialHullLogProb m b S.[0]
         [| { M = m; B = b; LogPr = logPr; Left = fst domain; Right = S.[0] } |]
 
     // upper hull
     let upperHullBeg =
         let m, b = computeHullLines S.[1] S.[2] fS.[1] fS.[2]
-        let pr = exp(b)/m * (exp(m * S.[1]) - exp(m * S.[0]))
-        let logPr = 
-            if m > 0.0 then
-                b - log(m) + logDiffExp (m * S.[1]) (m * S.[0])
-            else 
-                b - log(-m) + logDiffExp (m * S.[0]) (m*S.[1])
+        //let pr = exp(b)/m * (exp(m * S.[1]) - exp(m * S.[0]))
+        let logPr = computeHullLogProb m b S.[0] S.[1]
         [| { M = m; B = b; LogPr = logPr; Left = S.[0]; Right = S.[1] } |]
 
     // interior lines
@@ -97,44 +113,27 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
 
             let ix = (b1 - b2)/(m2 - m1)   // intersection of the two lines
 
-            let pr1 = exp(b1)/m1 * (exp(m1 * ix) - exp(m1*S.[li]))
-            let logPr1 = 
-                if m1 > 0.0 then
-                    b1 - log(m1) + logDiffExp (m1 * ix) (m1 * S.[li])
-                else 
-                    // both parts of the computation must be negative because the result is probability
-                    b1 - log(-m1) + logDiffExp (m1 * S.[li]) (m1 * ix)
+            //let pr1 = exp(b1)/m1 * (exp(m1 * ix) - exp(m1*S.[li]))
+            let logPr1 = computeHullLogProb m1 b1 S.[li] ix
             yield { M = m1; B = b1; LogPr = logPr1; Left = S.[li]; Right = ix }
 
-            let pr2 = exp(b2)/m2 * ( exp(m2 * S.[li+1]) - exp(m2 * ix) )
-            let logPr2 = 
-                if m2 > 0.0 then 
-                    b2 - log(m2) + logDiffExp (m2 * S.[li+1]) (m2 * ix)
-                else 
-                    b2 - log(-m2) + logDiffExp (m2 * ix) (m2 * S.[li+1])
+            //let pr2 = exp(b2)/m2 * ( exp(m2 * S.[li+1]) - exp(m2 * ix) )
+            let logPr2 = computeHullLogProb m2 b2 ix S.[li+1]
             yield {M = m2; B = b2; LogPr = logPr2; Left = ix; Right = S.[li + 1] }
             |]
 
     // second last line
     let upperHullEnd =
         let m, b = computeHullLines S.[fS.Length-3] S.[fS.Length-2] fS.[fS.Length-3] fS.[fS.Length-2]
-        let pr = exp(b)/m * ( exp(m*S.[fS.Length-1]) - exp(m*S.[fS.Length-2]))
-        let logPr = 
-            if m > 0.0 then
-                b - log(m) + logDiffExp (m*S.[fS.Length-1]) (m*S.[fS.Length-2])
-            else
-                b - log(-m) + logDiffExp (m*S.[fS.Length-2]) (m*S.[fS.Length-1])
+        //let pr = exp(b)/m * ( exp(m*S.[fS.Length-1]) - exp(m*S.[fS.Length-2]))
+        let logPr = computeHullLogProb m b S.[S.Length-2] S.[S.Length-1]
         [| { M = m; B = b; LogPr = logPr; Left = S.[fS.Length - 2]; Right = S.[fS.Length - 1] } |]
 
     // last line to the end of the domain
     let upperHullBoundaryEnd =
         let m, b = computeHullLines S.[fS.Length-2] S.[fS.Length-1] fS.[fS.Length-2] fS.[fS.Length-1]
-        let pr = exp(b)/m * (0.0 - exp(m * S.[fS.Length - 1]))
-        let logPr = 
-            if m > 0.0 then
-                b - log(m) - (m * S.[fS.Length - 1 ])
-            else 
-                b - log(-m) + (m * S.[fS.Length - 1 ])
+        //let pr = exp(b)/m * (0.0 - exp(m * S.[fS.Length - 1]))
+        let logPr = computeEndHullLogProb m b S.[S.Length-1]
         [| {M = m; B = b; LogPr = logPr; Left = S.[fS.Length - 1]; Right = snd domain } |]
 
     let upperHullUnnorm = 
