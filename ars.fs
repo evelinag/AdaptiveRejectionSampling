@@ -38,6 +38,7 @@ let logsumexp arr =
     out + aMax
 
 /// Computes log(exp(a) - exp(b))
+/// Assumes a > b
 let logDiffExp a b =
     if b > a then failwith "Incorrect arguments, b > a."
     let abMax = max a b
@@ -144,18 +145,20 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
            upperHullBoundaryEnd |]
          |> Array.concat 
 
-    //let Z = upperHullUnnorm |> Array.sumBy (fun uh -> uh.Pr)
+    // Normalizing constant
     let logZ = 
         upperHullUnnorm 
         |> Array.map (fun uh -> uh.LogPr) 
         |> logsumexp
-    
+
+    // Normalized probabilities
     let upperHull = 
         upperHullUnnorm 
         |> Array.map (fun uh -> { uh with LogPr = uh.LogPr - logZ })
 
     lowerHull, upperHull
 
+/// Sample from upper hull, using probabilities of inidividual sections
 let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
     let cdf = 
         Array.init upperHull.Length (fun i -> 
@@ -175,7 +178,7 @@ let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
 
     let x = log (U' * (exp(m*right) - exp(m*left)) + exp(m*left)) / m
 
-    if Double.IsInfinity(x) || Double.IsNaN(x) then
+    if x = infinity || Double.IsNaN(x) then
         failwith "Sampled an infinite or NaN x."
     x
 
@@ -191,7 +194,7 @@ let (|OutsideOnLeft|OutsideOnRight|InsideInterval|) (lowerHull:LowerHull[], x) =
             |> Array.findIndex (fun h -> h.Left <= x && x <= h.Right)    
         InsideInterval (intervalIdx)  
 
-/// Evaluate hull values at x
+/// Evaluate hull values at location x
 let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
     // lower bound
     let lhVal =
@@ -209,6 +212,7 @@ let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
 
     lhVal, uhVal
 
+/// For debugging purposes:
 /// Plot the upper and lower hulls, for debugging purposes only.
 /// Requires RProvider and RDotNet libraries.
 let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (fS:float[]) func =
@@ -218,12 +222,12 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
     let ext = 0.15 * Swidth
 
     let left = 
-        if Double.IsNegativeInfinity(fst domain) 
+        if (fst domain) = -infinity
         then S.[0] - ext 
         else S.[0]
 
     let right = 
-        if Double.IsPositiveInfinity(snd domain) 
+        if (snd domain) = infinity
         then S.[S.Length-1] + ext
         else S.[S.Length-1]
 
@@ -249,7 +253,7 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
         ()
 
     // Plot upper hull
-    if Double.IsPositiveInfinity(fst domain) then
+    if (fst domain) = infinity then
         let x = [| upperHull.[0].Right - ext .. plotStep .. upperHull.[0].Right |]
         let m = upperHull.[0].M
         let b = upperHull.[0].B
@@ -273,7 +277,7 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
         ()
 
     // last line
-    if Double.IsPositiveInfinity(snd domain) then
+    if (snd domain) = infinity then
         let x = [| upperHull.[upperHull.Length - 1].Left .. plotStep .. upperHull.[upperHull.Length - 1].Left + ext|]
         let m = upperHull.[upperHull.Length - 1].M
         let b = upperHull.[upperHull.Length - 1].B
@@ -287,7 +291,10 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
 
 // ================================================================================================
 /// Adaptive rejection sampling (derivative-free). Based on matlab implementation from 
-/// [PMTK library](https://github.com/probml).
+/// [PMTK3 library](https://github.com/probml/pmtk3).
+///
+/// Compared to the original implementation in matlab, this version computes 
+/// probabilities in log space which avoids overflow problems. 
 /// 
 /// # Parameters
 ///

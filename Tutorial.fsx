@@ -13,12 +13,58 @@ open RProvider.grDevices
 open System
 open MathNet.Numerics
 
-//#load "ars-rewrite.fs"
-//open AdaptiveRejectionSampling.ArsRewrite
-
 #load "ars.fs"
 open AdaptiveRejectionSampling
-// =======================
+
+//=================================================
+// Sample 1-D Gaussian
+
+// un-normalized Gaussian log likelihood
+let gaussianFunc x = 
+    let sigma = 1.0
+    -(x*x) / sigma
+
+let gaussianA = - 1.0
+let gaussianB = 1.0
+let gaussianDomain = (-infinity, infinity)
+
+// draw samples
+let samplesGaussian = 
+    adaptiveRejectionSampling gaussianFunc gaussianA gaussianB gaussianDomain 10000
+
+R.x11()
+namedParams [ "x", box samplesGaussian; "breaks", box 20]
+|> R.hist
+
+// qq-plot
+open RProvider.stats
+R.qqnorm(y=samplesGaussian)
+R.qqline(samplesGaussian)
+
+// =============================================
+// Sample Beta distribution
+
+// un-normalized beta log likelihood
+let betaFunc alpha beta x = 
+    (alpha - 1.0) * log x + (beta - 1.0) * log (1.0 - x)
+
+let alpha, beta = 2.0, 5.0
+let betaA = 0.2
+let betaB = 0.8
+let betaDomain = (0.0, 1.0) // finite bounds
+let samplesBeta = 
+    adaptiveRejectionSampling (betaFunc alpha beta) betaA betaB betaDomain 10000
+
+R.x11()
+namedParams [ "x", box samplesBeta; "breaks", box 50; "probability", box true]
+|> R.hist
+
+// Compare with samples from the true distribution
+open RProvider.stats
+R.qqplot(samplesBeta, R.rbeta(1000, alpha, beta))
+
+// ====================================================
+// Log likelihood from a more complex model
 
 let compositeWeights = [|0.25; 0.25; 0.25; 0.25|] 
 let pis = [|0.25; 0.25; 0.25; 0.25|]
@@ -33,87 +79,25 @@ let func x =
         (prior_p  * x - 1.0) * log current_p) compositeWeights pis
         |> Array.sum)
 
+// Plot the function
 let xs = [| 0.001 .. 0.001 .. 1.0|]
 let ys = xs |> Array.map func
 let ys' = ys |> Array.map exp
 
-//R.x11()
+R.x11()
+// concave log likelihood
 R.plot(namedParams["x", box xs; "y", box ys; "type", box "l"])
+// actual likelihood
 R.plot(namedParams["x", box xs; "y", box ys'; "type", box "l"])
 
-let domain = (0.0, Double.PositiveInfinity)
+
+let domain = (0.0, infinity)
 let a = 0.1
 let b = 0.5
-let nSamples = 10
-
-
-let samples = adaptiveRejectionSampling func a b domain 50000
+let nSamples = 10000
+let samples = adaptiveRejectionSampling func a b domain nSamples
 
 R.x11()
 namedParams [ "x", box samples; "breaks", box 100; "xlim", box [0.0; 1.0]]
 |> R.hist
 
-// look at accepts-rejects
-acceptsRejects |> List.sumBy (fun (x,b) -> if b = false then 1 else 0)
-acceptsRejects |> List.choose (fun (x,b) -> if b = false then Some x else None) |> R.plot
-
-
-
-let func = (fun (x:float) -> - x*x)
-let a = -1.0
-let b = 1.0
-let domain = (Double.NegativeInfinity, Double.PositiveInfinity)
-let nSamples = 1000
-let quad = ars func a b domain nSamples
-
-R.hist(quad)
-
-let sampleAvg = 
-    [| for i in 0..100 ->
-        let quad = ars func a b domain nSamples
-        quad |> List.average |]
-    |> Array.average
-
-
-//  ===============================================
-// Sample 1-D Gaussian
-let gaussianFunc x = 
-    let sigma = 1.0
-    -(x*x) / sigma
-
-let a = - 1.0
-let b = 1.0
-let domain = (Double.NegativeInfinity, Double.PositiveInfinity)
-let nSamples = 10000
-
-// draw samples
-let samplesGaussian = adaptiveRejectionSampling gaussianFunc a b domain nSamples
-
-R.x11()
-namedParams [ "x", box samplesGaussian; "breaks", box 20]
-|> R.hist
-
-open RProvider.StatDA
-R.ppplot_das(samplesGaussian)
-
-// =============================================
-// Sample Beta distribution
-let betaFunc alpha beta x = 
-    (alpha - 1.0) * log x + (beta - 1.0) * log (1.0 - x)
-
-R.x11()
-[ 0.0 .. 0.1 .. 1.0] |> List.map (betaFunc 2.0 5.0) |> R.plot
-
-let alpha, beta = 2.0, 5.0
-let a = 0.2
-let b = 0.8
-let domain = (0.0, 1.0)
-let func = betaFunc alpha beta
-let samplesBeta = adaptiveRejectionSampling func a b domain 10000
-
-R.x11()
-namedParams [ "x", box samplesBeta; "breaks", box 50; "probability", box true]
-|> R.hist
-
-open RProvider.stats
-R.qqplot(samplesBeta, R.rbeta(1000, alpha, beta))
