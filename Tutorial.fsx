@@ -17,7 +17,7 @@ open MathNet.Numerics
 //open AdaptiveRejectionSampling.ArsRewrite
 
 #load "ars.fs"
-open AdaptiveRejectionSampling.Ars
+open AdaptiveRejectionSampling
 // =======================
 
 let compositeWeights = [|0.25; 0.25; 0.25; 0.25|] 
@@ -47,7 +47,7 @@ let b = 0.5
 let nSamples = 10
 
 
-let samples = ars func a b domain 100
+let samples = adaptiveRejectionSampling func a b domain 50000
 
 R.x11()
 namedParams [ "x", box samples; "breaks", box 100; "xlim", box [0.0; 1.0]]
@@ -87,7 +87,7 @@ let domain = (Double.NegativeInfinity, Double.PositiveInfinity)
 let nSamples = 1000
 
 // draw samples
-let samplesGaussian = ars gaussianFunc a b domain nSamples
+let samplesGaussian = adaptiveRejectionSampling gaussianFunc a b domain nSamples
 
 R.x11()
 namedParams [ "x", box samplesGaussian; "breaks", box 20]
@@ -102,14 +102,14 @@ let betaFunc alpha beta x =
     (alpha - 1.0) * log x + (beta - 1.0) * log (1.0 - x)
 
 R.x11()
-[ 0.0 .. 0.1 .. 1.0] |> List.map (betaFunc 0.5 0.5) |> R.plot
+[ 0.0 .. 0.1 .. 1.0] |> List.map (betaFunc 2.0 5.0) |> R.plot
 
 let alpha, beta = 2.0, 5.0
 let a = 0.2
 let b = 0.8
 let domain = (0.0, 1.0)
 let func = betaFunc alpha beta
-let samplesBeta = ars func a b domain 1000
+let samplesBeta = adaptiveRejectionSampling func a b domain 10000
 
 R.x11()
 namedParams [ "x", box samplesBeta; "breaks", box 50; "probability", box true]

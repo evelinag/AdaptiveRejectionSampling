@@ -25,7 +25,26 @@ type UpperHull =
       B : float
       Left : float
       Right: float
-      Pr : float }
+      LogPr : float }
+
+/// Stable function to compute log (sum_i exp(x_i))
+let logsumexp arr =
+    let aMax = Array.max arr
+    let out = 
+        arr
+        |> Array.map (fun a -> exp(a - aMax))
+        |> Array.sum
+        |> log
+    out + aMax
+
+/// Computes log(exp(a) - exp(b))
+let logDiffExp a b =
+    if b > a then failwith "Incorrect arguments, b > a."
+    let abMax = max a b
+    let a' = exp(a - abMax)
+    let b' = exp(b - abMax)
+    let diff' = (a' - b') |> log
+    diff' + abMax
 
 /// Compute hulls from a set of points and their function values
 let arsComputeHulls domain (S: float[]) (fS: float[]) =
@@ -45,14 +64,24 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
         let m = (fS.[1] - fS.[0])/(S.[1] - S.[0])
         let b = fS.[0] - m*S.[0]
         let pr = exp(b)/m * (exp(m*S.[0]) - 0.0)  // integrating from -infinity (or boundary point?)
-        [| { M = m; B = b; Pr = pr; Left = fst domain; Right = S.[0] } |]
+        let logPr = 
+            if m > 0.0 then
+                b - log(m) + m * S.[0]
+            else
+                b - log(-m) + m * S.[0]
+        [| { M = m; B = b; LogPr = logPr; Left = fst domain; Right = S.[0] } |]
 
     // upper hull
     let upperHullBeg =
         let m = (fS.[2] - fS.[1])/(S.[2] - S.[1])
         let b = fS.[1] - m * S.[1]
         let pr = exp(b)/m * (exp(m * S.[1]) - exp(m * S.[0]))
-        [| { M = m; B = b; Pr = pr; Left = S.[0]; Right = S.[1] } |]
+        let logPr = 
+            if m > 0.0 then
+                b - log(m) + logDiffExp (m * S.[1]) (m * S.[0])
+            else 
+                b - log(-m) + logDiffExp (m * S.[0]) (m*S.[1])
+        [| { M = m; B = b; LogPr = logPr; Left = S.[0]; Right = S.[1] } |]
 
     // interior lines
     // there are two lines between each abscissa
@@ -67,10 +96,21 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
             let ix = (b1 - b2)/(m2 - m1)   // intersection of the two lines
 
             let pr1 = exp(b1)/m1 * (exp(m1 * ix) - exp(m1*S.[li]))
-            yield { M = m1; B = b1; Pr = pr1; Left = S.[li]; Right = ix }
+            let logPr1 = 
+                if m1 > 0.0 then
+                    b1 - log(m1) + logDiffExp (m1 * ix) (m1 * S.[li])
+                else 
+                    // both parts of the computation must be negative because the result is probability
+                    b1 - log(-m1) + logDiffExp (m1 * S.[li]) (m1 * ix)
+            yield { M = m1; B = b1; LogPr = logPr1; Left = S.[li]; Right = ix }
 
             let pr2 = exp(b2)/m2 * ( exp(m2 * S.[li+1]) - exp(m2 * ix) )
-            yield {M = m2; B = b2; Pr = pr2; Left = ix; Right = S.[li + 1] }
+            let logPr2 = 
+                if m2 > 0.0 then 
+                    b2 - log(m2) + logDiffExp (m2 * S.[li+1]) (m2 * ix)
+                else 
+                    b2 - log(-m2) + logDiffExp (m2 * ix) (m2 * S.[li+1])
+            yield {M = m2; B = b2; LogPr = logPr2; Left = ix; Right = S.[li + 1] }
             |]
 
     // second last line
@@ -78,14 +118,24 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
         let m = (fS.[fS.Length-2] - fS.[fS.Length - 3])/(S.[fS.Length - 2] - S.[fS.Length - 3])
         let b = fS.[fS.Length - 2] - m*S.[fS.Length - 2]
         let pr = exp(b)/m * ( exp(m*S.[fS.Length-1]) - exp(m*S.[fS.Length-2]))
-        [| { M = m; B = b; Pr = pr; Left = S.[fS.Length - 2]; Right = S.[fS.Length - 1] } |]
+        let logPr = 
+            if m > 0.0 then
+                b - log(m) + logDiffExp (m*S.[fS.Length-1]) (m*S.[fS.Length-2])
+            else
+                b - log(-m) + logDiffExp (m*S.[fS.Length-2]) (m*S.[fS.Length-1])
+        [| { M = m; B = b; LogPr = logPr; Left = S.[fS.Length - 2]; Right = S.[fS.Length - 1] } |]
 
     // last line to the end of the domain
     let upperHullBoundaryEnd =
         let m = (fS.[fS.Length - 1] - fS.[fS.Length - 2])/(S.[fS.Length - 1] - S.[fS.Length - 2])
         let b = fS.[fS.Length - 1] - m * S.[fS.Length - 1]
         let pr = exp(b)/m * (0.0 - exp(m * S.[fS.Length - 1]))
-        [| {M = m; B = b; Pr = pr; Left = S.[fS.Length - 1]; Right = snd domain } |]
+        let logPr = 
+            if m > 0.0 then
+                b - log(m) - (m * S.[fS.Length - 1 ])
+            else 
+                b - log(-m) + (m * S.[fS.Length - 1 ])
+        [| {M = m; B = b; LogPr = logPr; Left = S.[fS.Length - 1]; Right = snd domain } |]
 
     let upperHullUnnorm = 
         [| upperHullBoundaryBeg; 
@@ -95,18 +145,22 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
            upperHullBoundaryEnd |]
          |> Array.concat 
 
-    let Z = upperHullUnnorm |> Array.sumBy (fun uh -> uh.Pr)
+    //let Z = upperHullUnnorm |> Array.sumBy (fun uh -> uh.Pr)
+    let logZ = 
+        upperHullUnnorm 
+        |> Array.map (fun uh -> uh.LogPr) 
+        |> logsumexp
     
     let upperHull = 
         upperHullUnnorm 
-        |> Array.map (fun uh -> { uh with Pr = uh.Pr/Z })
+        |> Array.map (fun uh -> { uh with LogPr = uh.LogPr - logZ })
 
     lowerHull, upperHull
 
 let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
     let cdf = 
         Array.init upperHull.Length (fun i -> 
-            upperHull.[..i] |> Array.map (fun uh -> uh.Pr) |> Array.sum)
+            upperHull.[..i] |> Array.map (fun uh -> exp uh.LogPr) |> Array.sum)
 
     // randomly choose a line segment
     let U = rnd.NextDouble()
@@ -148,7 +202,6 @@ let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
         | InsideInterval intervalIdx ->
             let lh = lowerHull.[intervalIdx]
             lh.M * x + lh.B
-        | _ -> failwith "Lower hull cannot be evaluated at x"
     
     // upper bound
     let uhVal =
