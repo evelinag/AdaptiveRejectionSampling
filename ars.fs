@@ -46,6 +46,14 @@ let logDiffExp a b =
     let diff' = (a' - b') |> log
     diff' + abMax
 
+let computeHullLines x xNext fx fxNext =
+    let m = (fxNext - fx)/(xNext - x)
+    let b = fx - m * x
+    m, b
+
+let computeHullProbability m b x xNext =
+    0.0
+
 /// Compute hulls from a set of points and their function values
 let arsComputeHulls domain (S: float[]) (fS: float[]) =
     // lower piecewise-linear hull
@@ -53,16 +61,14 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
         Seq.zip S fS
         |> Seq.pairwise
         |> Seq.map (fun ((s1, fs1), (s2, fs2)) ->
-            let m = (fs2 - fs1)/(s2 - s1)
-            let b = fs1 - m * s1
+            let m, b = computeHullLines s1 s2 fs1 fs2
             {M = m; B = b; Left = s1; Right = s2}:LowerHull)
         |> Array.ofSeq 
 
     // upper hull:
     // first line from the domain boundary
     let upperHullBoundaryBeg =
-        let m = (fS.[1] - fS.[0])/(S.[1] - S.[0])
-        let b = fS.[0] - m*S.[0]
+        let m, b = computeHullLines S.[0] S.[1] fS.[0] fS.[1]
         let pr = exp(b)/m * (exp(m*S.[0]) - 0.0)  // integrating from -infinity (or boundary point?)
         let logPr = 
             if m > 0.0 then
@@ -73,8 +79,7 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
 
     // upper hull
     let upperHullBeg =
-        let m = (fS.[2] - fS.[1])/(S.[2] - S.[1])
-        let b = fS.[1] - m * S.[1]
+        let m, b = computeHullLines S.[1] S.[2] fS.[1] fS.[2]
         let pr = exp(b)/m * (exp(m * S.[1]) - exp(m * S.[0]))
         let logPr = 
             if m > 0.0 then
@@ -87,11 +92,8 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
     // there are two lines between each abscissa
     let upperHullMid = 
       [|  for li in 1..S.Length-3 do
-            let m1 = (fS.[li] - fS.[li-1])/(S.[li] - S.[li-1])
-            let b1 = fS.[li] - m1 * S.[li]
-
-            let m2 = (fS.[li+2]-fS.[li+1])/(S.[li+2] - S.[li+1])
-            let b2 = fS.[li+1] - m2*S.[li+1]
+            let m1, b1 = computeHullLines S.[li-1] S.[li] fS.[li-1] fS.[li]
+            let m2, b2 = computeHullLines S.[li+1] S.[li+2] fS.[li+1] fS.[li+2]
 
             let ix = (b1 - b2)/(m2 - m1)   // intersection of the two lines
 
@@ -115,8 +117,7 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
 
     // second last line
     let upperHullEnd =
-        let m = (fS.[fS.Length-2] - fS.[fS.Length - 3])/(S.[fS.Length - 2] - S.[fS.Length - 3])
-        let b = fS.[fS.Length - 2] - m*S.[fS.Length - 2]
+        let m, b = computeHullLines S.[fS.Length-3] S.[fS.Length-2] fS.[fS.Length-3] fS.[fS.Length-2]
         let pr = exp(b)/m * ( exp(m*S.[fS.Length-1]) - exp(m*S.[fS.Length-2]))
         let logPr = 
             if m > 0.0 then
@@ -127,8 +128,7 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
 
     // last line to the end of the domain
     let upperHullBoundaryEnd =
-        let m = (fS.[fS.Length - 1] - fS.[fS.Length - 2])/(S.[fS.Length - 1] - S.[fS.Length - 2])
-        let b = fS.[fS.Length - 1] - m * S.[fS.Length - 1]
+        let m, b = computeHullLines S.[fS.Length-2] S.[fS.Length-1] fS.[fS.Length-2] fS.[fS.Length-1]
         let pr = exp(b)/m * (0.0 - exp(m * S.[fS.Length - 1]))
         let logPr = 
             if m > 0.0 then

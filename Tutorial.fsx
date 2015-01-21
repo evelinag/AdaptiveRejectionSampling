@@ -84,7 +84,7 @@ let gaussianFunc x =
 let a = - 1.0
 let b = 1.0
 let domain = (Double.NegativeInfinity, Double.PositiveInfinity)
-let nSamples = 1000
+let nSamples = 10000
 
 // draw samples
 let samplesGaussian = adaptiveRejectionSampling gaussianFunc a b domain nSamples
