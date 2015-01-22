@@ -166,7 +166,13 @@ let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
 
     // randomly choose a line segment
     let U = rnd.NextDouble()
-    let li = cdf |> Array.findIndex (fun s -> U < s)    // index of a line segment
+    let li = 
+        let idx = cdf |> Array.tryFindIndex (fun s -> U < s)    // index of a line segment
+        match idx with
+        | Some(i) -> i
+        | None ->
+            printfn "ARS: sampling failed.\nCDF:%A\nSample:%A" cdf U
+            failwith "Invalid sample."
 
     // sample along that line segment
     let U' = rnd.NextDouble()
@@ -316,9 +322,11 @@ let adaptiveRejectionSampling func a b domain nSamples =
     let begGradientPositive = func a' - func a >= 0.0
     let endGradientNegative = func b - func b' <= 0.0
 
-    if b <= a || (fst domain = -infinity && not begGradientPositive)
-              || (snd domain = infinity && not endGradientNegative)
-    then failwith "Incorrect initial points"
+    if a <= (fst domain) then invalidArg "a" "First initial point is outside of the domain."
+    if b >= (snd domain) then invalidArg "b" "Second initial point is outside of the domain."
+    if b <= a then invalidArg "ab" "a >= b. First initial point must be smaller than second initial point."
+    if (fst domain = -infinity && not begGradientPositive) then invalidArg "a" "Gradient is not positive at a (first initial point)."
+    if (snd domain = infinity && not endGradientNegative) then invalidArg "b" "Gradient is not negative at b (second initial point)."
 
     // initialize mesh on which to create upper and lower hulls
     let nInitialMeshPoints = 3
