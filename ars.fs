@@ -25,7 +25,59 @@ type UpperHull =
       B : float
       Left : float
       Right: float
-      Pr : float }
+      LogPr : float }
+
+/// Stable function to compute log (sum_i exp(x_i))
+let logsumexp arr =
+    let aMax = Array.max arr
+    let out = 
+        arr
+        |> Array.map (fun a -> exp(a - aMax))
+        |> Array.sum
+        |> log
+    out + aMax
+
+/// Computes log(exp(a) - exp(b))
+/// Assumes a > b
+let logDiffExp a b =
+    if b > a then failwith "Incorrect arguments, b > a."
+    let abMax = max a b
+    let a' = exp(a - abMax)
+    let b' = exp(b - abMax)
+    let diff' = (a' - b') |> log
+    diff' + abMax
+
+/// Computes hull lines between two points. Parameters
+/// are the points `x` and `xNext` with their function values `fx` and `fxNext`.
+let computeHullLines x xNext fx fxNext =
+    let m = (fxNext - fx)/(xNext - x)
+    let b = fx - m * x
+    m, b
+
+/// Log probability of a hull within the interval [x, xNext]
+let computeHullLogProb m b x xNext =
+    if m > 0.0 then
+        b - log(m) + logDiffExp (m * xNext) (m * x)
+    else
+        // decreasing function - numerically equivalent but avoids negative arguments in log
+        b - log(-m) + logDiffExp (m * x) (m * xNext)
+
+/// Log probability of the initial hull.
+/// From the boundary (finite or -infinity) to the first point.
+let computeInitialHullLogProb m b x =
+    if m > 0.0 then
+        b - log(m) + (m * x)
+    else
+        b - log(-m) - (m * x)
+
+/// Log probability of the end hull.
+/// From the last point to the boundary (finite or infinity)
+let computeEndHullLogProb m b x = 
+    if m > 0.0 then
+        b - log(m) - (m * x)
+    else 
+        b - log(-m) + (m * x)
+
 
 /// Compute hulls from a set of points and their function values
 let arsComputeHulls domain (S: float[]) (fS: float[]) =
@@ -34,58 +86,56 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
         Seq.zip S fS
         |> Seq.pairwise
         |> Seq.map (fun ((s1, fs1), (s2, fs2)) ->
-            let m = (fs2 - fs1)/(s2 - s1)
-            let b = fs1 - m * s1
+            let m, b = computeHullLines s1 s2 fs1 fs2
             {M = m; B = b; Left = s1; Right = s2}:LowerHull)
         |> Array.ofSeq 
 
     // upper hull:
     // first line from the domain boundary
     let upperHullBoundaryBeg =
-        let m = (fS.[1] - fS.[0])/(S.[1] - S.[0])
-        let b = fS.[0] - m*S.[0]
-        let pr = exp(b)/m * (exp(m*S.[0]) - 0.0)  // integrating from -infinity (or boundary point?)
-        [| { M = m; B = b; Pr = pr; Left = fst domain; Right = S.[0] } |]
+        let m, b = computeHullLines S.[0] S.[1] fS.[0] fS.[1]
+        //let pr = exp(b)/m * (exp(m*S.[0]) - 0.0)  // integrating from -infinity (or boundary point?)
+        let logPr = computeInitialHullLogProb m b S.[0]
+        [| { M = m; B = b; LogPr = logPr; Left = fst domain; Right = S.[0] } |]
 
     // upper hull
     let upperHullBeg =
-        let m = (fS.[2] - fS.[1])/(S.[2] - S.[1])
-        let b = fS.[1] - m * S.[1]
-        let pr = exp(b)/m * (exp(m * S.[1]) - exp(m * S.[0]))
-        [| { M = m; B = b; Pr = pr; Left = S.[0]; Right = S.[1] } |]
+        let m, b = computeHullLines S.[1] S.[2] fS.[1] fS.[2]
+        //let pr = exp(b)/m * (exp(m * S.[1]) - exp(m * S.[0]))
+        let logPr = computeHullLogProb m b S.[0] S.[1]
+        [| { M = m; B = b; LogPr = logPr; Left = S.[0]; Right = S.[1] } |]
 
     // interior lines
     // there are two lines between each abscissa
     let upperHullMid = 
       [|  for li in 1..S.Length-3 do
-            let m1 = (fS.[li] - fS.[li-1])/(S.[li] - S.[li-1])
-            let b1 = fS.[li] - m1 * S.[li]
-
-            let m2 = (fS.[li+2]-fS.[li+1])/(S.[li+2] - S.[li+1])
-            let b2 = fS.[li+1] - m2*S.[li+1]
+            let m1, b1 = computeHullLines S.[li-1] S.[li] fS.[li-1] fS.[li]
+            let m2, b2 = computeHullLines S.[li+1] S.[li+2] fS.[li+1] fS.[li+2]
 
             let ix = (b1 - b2)/(m2 - m1)   // intersection of the two lines
 
-            let pr1 = exp(b1)/m1 * (exp(m1 * ix) - exp(m1*S.[li]))
-            yield { M = m1; B = b1; Pr = pr1; Left = S.[li]; Right = ix }
+            //let pr1 = exp(b1)/m1 * (exp(m1 * ix) - exp(m1*S.[li]))
+            let logPr1 = computeHullLogProb m1 b1 S.[li] ix
+            yield { M = m1; B = b1; LogPr = logPr1; Left = S.[li]; Right = ix }
 
-            let pr2 = exp(b2)/m2 * ( exp(m2 * S.[li+1]) - exp(m2 * ix) )
-            yield {M = m2; B = b2; Pr = pr2; Left = ix; Right = S.[li + 1] }
+            //let pr2 = exp(b2)/m2 * ( exp(m2 * S.[li+1]) - exp(m2 * ix) )
+            let logPr2 = computeHullLogProb m2 b2 ix S.[li+1]
+            yield {M = m2; B = b2; LogPr = logPr2; Left = ix; Right = S.[li + 1] }
             |]
 
     // second last line
     let upperHullEnd =
-        let m = (fS.[fS.Length-2] - fS.[fS.Length - 3])/(S.[fS.Length - 2] - S.[fS.Length - 3])
-        let b = fS.[fS.Length - 2] - m*S.[fS.Length - 2]
-        let pr = exp(b)/m * ( exp(m*S.[fS.Length-1]) - exp(m*S.[fS.Length-2]))
-        [| { M = m; B = b; Pr = pr; Left = S.[fS.Length - 2]; Right = S.[fS.Length - 1] } |]
+        let m, b = computeHullLines S.[fS.Length-3] S.[fS.Length-2] fS.[fS.Length-3] fS.[fS.Length-2]
+        //let pr = exp(b)/m * ( exp(m*S.[fS.Length-1]) - exp(m*S.[fS.Length-2]))
+        let logPr = computeHullLogProb m b S.[S.Length-2] S.[S.Length-1]
+        [| { M = m; B = b; LogPr = logPr; Left = S.[fS.Length - 2]; Right = S.[fS.Length - 1] } |]
 
     // last line to the end of the domain
     let upperHullBoundaryEnd =
-        let m = (fS.[fS.Length - 1] - fS.[fS.Length - 2])/(S.[fS.Length - 1] - S.[fS.Length - 2])
-        let b = fS.[fS.Length - 1] - m * S.[fS.Length - 1]
-        let pr = exp(b)/m * (0.0 - exp(m * S.[fS.Length - 1]))
-        [| {M = m; B = b; Pr = pr; Left = S.[fS.Length - 1]; Right = snd domain } |]
+        let m, b = computeHullLines S.[fS.Length-2] S.[fS.Length-1] fS.[fS.Length-2] fS.[fS.Length-1]
+        //let pr = exp(b)/m * (0.0 - exp(m * S.[fS.Length - 1]))
+        let logPr = computeEndHullLogProb m b S.[S.Length-1]
+        [| {M = m; B = b; LogPr = logPr; Left = S.[fS.Length - 1]; Right = snd domain } |]
 
     let upperHullUnnorm = 
         [| upperHullBoundaryBeg; 
@@ -95,18 +145,24 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
            upperHullBoundaryEnd |]
          |> Array.concat 
 
-    let Z = upperHullUnnorm |> Array.sumBy (fun uh -> uh.Pr)
-    
+    // Normalizing constant
+    let logZ = 
+        upperHullUnnorm 
+        |> Array.map (fun uh -> uh.LogPr) 
+        |> logsumexp
+
+    // Normalized probabilities
     let upperHull = 
         upperHullUnnorm 
-        |> Array.map (fun uh -> { uh with Pr = uh.Pr/Z })
+        |> Array.map (fun uh -> { uh with LogPr = uh.LogPr - logZ })
 
     lowerHull, upperHull
 
+/// Sample from upper hull, using probabilities of inidividual sections
 let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
     let cdf = 
         Array.init upperHull.Length (fun i -> 
-            upperHull.[..i] |> Array.map (fun uh -> uh.Pr) |> Array.sum)
+            upperHull.[..i] |> Array.map (fun uh -> exp uh.LogPr) |> Array.sum)
 
     // randomly choose a line segment
     let U = rnd.NextDouble()
@@ -122,7 +178,7 @@ let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
 
     let x = log (U' * (exp(m*right) - exp(m*left)) + exp(m*left)) / m
 
-    if Double.IsInfinity(x) || Double.IsNaN(x) then
+    if x = infinity || Double.IsNaN(x) then
         failwith "Sampled an infinite or NaN x."
     x
 
@@ -138,7 +194,7 @@ let (|OutsideOnLeft|OutsideOnRight|InsideInterval|) (lowerHull:LowerHull[], x) =
             |> Array.findIndex (fun h -> h.Left <= x && x <= h.Right)    
         InsideInterval (intervalIdx)  
 
-/// Evaluate hull values at x
+/// Evaluate hull values at location x
 let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
     // lower bound
     let lhVal =
@@ -148,7 +204,6 @@ let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
         | InsideInterval intervalIdx ->
             let lh = lowerHull.[intervalIdx]
             lh.M * x + lh.B
-        | _ -> failwith "Lower hull cannot be evaluated at x"
     
     // upper bound
     let uhVal =
@@ -157,6 +212,7 @@ let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
 
     lhVal, uhVal
 
+/// For debugging purposes:
 /// Plot the upper and lower hulls, for debugging purposes only.
 /// Requires RProvider and RDotNet libraries.
 let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (fS:float[]) func =
@@ -166,12 +222,12 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
     let ext = 0.15 * Swidth
 
     let left = 
-        if Double.IsNegativeInfinity(fst domain) 
+        if (fst domain) = -infinity
         then S.[0] - ext 
         else S.[0]
 
     let right = 
-        if Double.IsPositiveInfinity(snd domain) 
+        if (snd domain) = infinity
         then S.[S.Length-1] + ext
         else S.[S.Length-1]
 
@@ -197,7 +253,7 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
         ()
 
     // Plot upper hull
-    if Double.IsPositiveInfinity(fst domain) then
+    if (fst domain) = infinity then
         let x = [| upperHull.[0].Right - ext .. plotStep .. upperHull.[0].Right |]
         let m = upperHull.[0].M
         let b = upperHull.[0].B
@@ -221,7 +277,7 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
         ()
 
     // last line
-    if Double.IsPositiveInfinity(snd domain) then
+    if (snd domain) = infinity then
         let x = [| upperHull.[upperHull.Length - 1].Left .. plotStep .. upperHull.[upperHull.Length - 1].Left + ext|]
         let m = upperHull.[upperHull.Length - 1].M
         let b = upperHull.[upperHull.Length - 1].B
@@ -235,7 +291,10 @@ let arsPlot (upperHull:UpperHull[]) (lowerHull:LowerHull[]) domain (S:float[]) (
 
 // ================================================================================================
 /// Adaptive rejection sampling (derivative-free). Based on matlab implementation from 
-/// [PMTK library](https://github.com/probml).
+/// [PMTK3 library](https://github.com/probml/pmtk3).
+///
+/// Compared to the original implementation in matlab, this version computes 
+/// probabilities in log space which avoids overflow problems. 
 /// 
 /// # Parameters
 ///
