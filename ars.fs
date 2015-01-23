@@ -28,24 +28,36 @@ type UpperHull =
       LogPr : float }
 
 /// Stable function to compute log (sum_i exp(x_i))
-let logsumexp arr =
-    let aMax = Array.max arr
+let logSumExp values =
+    let aMax = Array.max values
     let out = 
-        arr
+        values
         |> Array.map (fun a -> exp(a - aMax))
         |> Array.sum
         |> log
     out + aMax
 
-/// Computes log(exp(a) - exp(b))
-/// Assumes a > b
-let logDiffExp a b =
-    if b > a then failwith "Incorrect arguments, b > a."
-    let abMax = max a b
-    let a' = exp(a - abMax)
-    let b' = exp(b - abMax)
-    let diff' = (a' - b') |> log
-    diff' + abMax
+type Sign = | Plus | Minus
+
+/// Performs general log-sum-exp trick on an array of values
+/// 
+/// `plusMinus` is an array containing +1.0 or -1.0, which represents
+///             the plus/minus signs for each element in the general sum.
+/// For example, log(exp(a) - exp(b)) is represented as:
+/// `values = [|a;b|]`
+/// `signs = [|+1.0, -1.0|]`
+let logGeneralSumExp values (signs: Sign[]) =
+    let maxValue = Array.max values
+    let values' = 
+        values 
+        |> Array.mapi (fun i x -> 
+            match signs.[i] with
+            | Plus ->  exp(x - maxValue)
+            | Minus -> -exp(x - maxValue))
+        |> Array.sum
+        |> log
+    values' + maxValue        
+
 
 /// Computes hull lines between two points. Parameters
 /// are the points `x` and `xNext` with their function values `fx` and `fxNext`.
@@ -57,10 +69,10 @@ let computeHullLines x xNext fx fxNext =
 /// Log probability of a hull within the interval [x, xNext]
 let computeHullLogProb m b x xNext =
     if m > 0.0 then
-        b - log(m) + logDiffExp (m * xNext) (m * x)
+        b - log(m) + (logGeneralSumExp [| m * xNext; m * x |] [|Plus; Minus|])
     else
         // decreasing function - numerically equivalent but avoids negative arguments in log
-        b - log(-m) + logDiffExp (m * x) (m * xNext)
+        b - log(-m) + (logGeneralSumExp [|m * x; m * xNext |] [|Plus; Minus|])
 
 /// Log probability of the initial hull.
 /// From the boundary (finite or -infinity) to the first point.
@@ -149,7 +161,7 @@ let arsComputeHulls domain (S: float[]) (fS: float[]) =
     let logZ = 
         upperHullUnnorm 
         |> Array.map (fun uh -> uh.LogPr) 
-        |> logsumexp
+        |> logSumExp
 
     // Normalized probabilities
     let upperHull = 
@@ -182,7 +194,11 @@ let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
     let left = upperHull.[li].Left
     let right = upperHull.[li].Right
 
-    let x = log (U' * (exp(m*right) - exp(m*left)) + exp(m*left)) / m
+    // let x = log (U' * (exp(m*right) - exp(m*left)) + exp(m*left)) / m
+    let x = 
+        let numerator = 
+            logGeneralSumExp [|log(U') + m*right; log(U') + m*left; (m*left)|]  [|Plus; Minus; Plus|]
+        numerator / m
 
     if x = infinity || Double.IsNaN(x) then
         failwith "Sampled an infinite or NaN x."
