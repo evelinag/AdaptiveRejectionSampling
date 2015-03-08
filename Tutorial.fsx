@@ -68,7 +68,7 @@ R.qqplot(samplesBeta, R.rbeta(1000, alpha, beta))
 
 let compositeWeights = [|0.25; 0.25; 0.25; 0.25|] 
 let pis = [|0.25; 0.25; 0.25; 0.25|]
-let a0 = 2.0
+let a0 = 0.01
 let b0 = 20.0
 
 let func x = 
@@ -92,7 +92,7 @@ R.plot(namedParams["x", box xs; "y", box ys'; "type", box "l"])
 
 
 let domain = (0.0, infinity)
-let a = 0.1
+let a = 0.001
 let b = 0.5
 let nSamples = 10000
 let samples = adaptiveRejectionSampling func a b domain nSamples

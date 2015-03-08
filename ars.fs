@@ -3,8 +3,6 @@ module AdaptiveRejectionSampling
 
 open System
 
-open System
-
 #if INTERACTIVE
 open RDotNet
 open RProvider
@@ -37,42 +35,41 @@ let logSumExp values =
         |> log
     out + aMax
 
-type Sign = | Plus | Minus
+type Sign = Plus | Minus
 
-/// Performs general log-sum-exp trick on an array of values
-/// 
-/// `plusMinus` is an array containing +1.0 or -1.0, which represents
-///             the plus/minus signs for each element in the general sum.
-/// For example, log(exp(a) - exp(b)) is represented as:
-/// `values = [|a;b|]`
-/// `signs = [|+1.0, -1.0|]`
-let logGeneralSumExp values (signs: Sign[]) =
-    let maxValue = Array.max values
-    let values' = 
+/// Performs general log-sum-exp trick on an array of values.
+/// Deals with negative arguments that appear within the logarithm.
+let generalLogSumExp (values : (float * Sign)[]) = 
+    let (.*) (s:Sign) (x:float) = 
+        match s with Plus -> x | Minus -> -x
+
+    let maxValue, _ = Array.maxBy fst values
+    let insideLog = 
         values 
-        |> Array.mapi (fun i x -> 
-            match signs.[i] with
-            | Plus ->  exp(x - maxValue)
-            | Minus -> -exp(x - maxValue))
+        |> Array.map (fun (x, sx) -> sx .* exp(x - maxValue))
         |> Array.sum
-        |> log
-    values' + maxValue        
+    if insideLog > 0.0
+    then log(insideLog) + maxValue
+    else -1.0 * (log(-insideLog) + maxValue)
 
 
 /// Computes hull lines between two points. Parameters
 /// are the points `x` and `xNext` with their function values `fx` and `fxNext`.
-let computeHullLines x xNext fx fxNext =
+let computeHullLines (x:float) xNext fx fxNext =
     let m = (fxNext - fx)/(xNext - x)
     let b = fx - m * x
     m, b
 
 /// Log probability of a hull within the interval [x, xNext]
+/// b - log(m) + log(exp(m * xNext) - exp(m * x))
 let computeHullLogProb m b x xNext =
     if m > 0.0 then
-        b - log(m) + (logGeneralSumExp [| m * xNext; m * x |] [|Plus; Minus|])
+        let value = b - log(m) + generalLogSumExp [| m * xNext, Plus; m * x, Minus |]
+        value
     else
-        // decreasing function - numerically equivalent but avoids negative arguments in log
-        b - log(-m) + (logGeneralSumExp [|m * x; m * xNext |] [|Plus; Minus|])
+        // decreasing function - numerically equivalent formulation that avoids negative arguments in log
+        let value = b - log(-m) + generalLogSumExp [|m * x, Plus; m * xNext, Minus|]
+        value
 
 /// Log probability of the initial hull.
 /// From the boundary (finite or -infinity) to the first point.
@@ -196,8 +193,7 @@ let arsSampleUpperHull (upperHull: UpperHull[]) (rnd:Random) =
 
     // let x = log (U' * (exp(m*right) - exp(m*left)) + exp(m*left)) / m
     let x = 
-        let numerator = 
-            logGeneralSumExp [|log(U') + m*right; log(U') + m*left; (m*left)|]  [|Plus; Minus; Plus|]
+        let numerator = generalLogSumExp [|log(U') + m*right, Plus; log(U') + m*left, Minus; (m*left), Plus|]
         numerator / m
 
     if x = infinity || Double.IsNaN(x) then
@@ -214,7 +210,7 @@ let (|OutsideOnLeft|OutsideOnRight|InsideInterval|) (lowerHull:LowerHull[], x) =
         let intervalIdx =      
             lowerHull 
             |> Array.findIndex (fun h -> h.Left <= x && x <= h.Right)    
-        InsideInterval (intervalIdx)  
+        InsideInterval (lowerHull.[intervalIdx])  
 
 /// Evaluate hull values at location x
 let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
@@ -223,9 +219,7 @@ let arsEvalHulls (x:float) (lowerHull:LowerHull[]) (upperHull:UpperHull[]) =
         match (lowerHull, x) with
         | OutsideOnLeft -> -infinity
         | OutsideOnRight -> -infinity
-        | InsideInterval intervalIdx ->
-            let lh = lowerHull.[intervalIdx]
-            lh.M * x + lh.B
+        | InsideInterval lh -> lh.M * x + lh.B
     
     // upper bound
     let uhVal =
